@@ -1,0 +1,469 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Cow Run</title>
+  <style>
+    :root {
+      --sky-top: #dff6ff;
+      --sky-bottom: #f7fbff;
+      --grass: #7cc56d;
+      --grass-dark: #4d9d53;
+      --ground: #d8b57d;
+      --cow: #f5f5f5;
+      --cow-shadow: #c7c7c7;
+      --obstacle: #7d5a3b;
+      --text: #1d2a2f;
+      --accent: #ffb703;
+    }
+
+    * { box-sizing: border-box; }
+
+    body {
+      margin: 0;
+      display: grid;
+      place-items: center;
+      min-height: 100vh;
+      background: linear-gradient(180deg, #97d4f5, #eaf7ff);
+      font-family: Arial, Helvetica, sans-serif;
+      color: var(--text);
+      overflow: hidden;
+    }
+
+    .game-shell {
+      width: min(90vw, 980px);
+      background: rgba(255,255,255,0.28);
+      border: 3px solid rgba(0,0,0,0.08);
+      border-radius: 18px;
+      box-shadow: 0 25px 50px rgba(36, 66, 91, 0.16);
+      padding: 18px 18px 12px;
+      backdrop-filter: blur(3px);
+    }
+
+    .hud {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      font-weight: 700;
+      margin-bottom: 8px;
+      padding: 0 6px;
+      font-size: clamp(16px, 2vw, 22px);
+    }
+
+    .score-wrap {
+      display: flex;
+      gap: 18px;
+      align-items: center;
+    }
+
+    canvas {
+      display: block;
+      width: 100%;
+      height: auto;
+      background: linear-gradient(180deg, var(--sky-top) 0%, var(--sky-bottom) 72%, #d9f0a2 72%, #bfe37a 100%);
+      border: 3px solid rgba(0,0,0,0.08);
+      border-radius: 12px;
+      image-rendering: auto;
+    }
+
+    .controls {
+      margin-top: 10px;
+      text-align: center;
+      font-size: 14px;
+      color: #2d4650;
+      font-weight: 600;
+      letter-spacing: 0.03em;
+    }
+  </style>
+</head>
+<body>
+  <div class="game-shell">
+    <div class="hud">
+      <div>🐄 Cow Run</div>
+      <div class="score-wrap">
+        <span>Score: <span id="score">0</span></span>
+        <span>Best: <span id="best">0</span></span>
+      </div>
+    </div>
+
+    <canvas id="game" width="900" height="300" aria-label="Cow Run game"></canvas>
+
+    <div class="controls">
+      Press Space / ↑ / tap to jump • Press R to restart
+    </div>
+  </div>
+
+  <script>
+    const canvas = document.getElementById("game");
+    const ctx = canvas.getContext("2d");
+
+    const scoreEl = document.getElementById("score");
+    const bestEl = document.getElementById("best");
+
+    const groundY = 230;
+    const gravity = 0.8;
+    let animationId;
+
+    let gameRunning = false;
+    let gameOver = false;
+    let score = 0;
+    let best = Number(localStorage.getItem("cowRunBest") || 0);
+    bestEl.textContent = best;
+
+    const player = {
+      x: 90,
+      y: groundY - 54,
+      width: 52,
+      height: 42,
+      velY: 0,
+      jumpForce: 15,
+      grounded: true
+    };
+
+    const world = {
+      speed: 6,
+      groundOffset: 0
+    };
+
+    const obstacles = [];
+    let spawnTimer = 0;
+    let lastTime = 0;
+
+    function resetGame() {
+      gameOver = false;
+      gameRunning = true;
+      score = 0;
+      player.y = groundY - player.height;
+      player.velY = 0;
+      player.grounded = true;
+      obstacles.length = 0;
+      spawnTimer = 0;
+      world.speed = 6;
+      world.groundOffset = 0;
+      scoreEl.textContent = score;
+      lastTime = 0;
+      if (animationId) cancelAnimationFrame(animationId);
+      animationId = requestAnimationFrame(loop);
+    }
+
+    function startGame() {
+      if (!gameRunning || gameOver) {
+        resetGame();
+      } else {
+        jump();
+      }
+    }
+
+    function jump() {
+      if (gameOver) return;
+      if (player.grounded) {
+        player.velY = -player.jumpForce;
+        player.grounded = false;
+      }
+    }
+
+    function gameOverState() {
+      gameOver = true;
+      gameRunning = false;
+      best = Math.max(best, score);
+      localStorage.setItem("cowRunBest", String(best));
+      bestEl.textContent = best;
+      cancelAnimationFrame(animationId);
+    }
+
+    function rectsIntersect(a, b) {
+      return (
+        a.x < b.x + b.width &&
+        a.x + a.width > b.x &&
+        a.y < b.y + b.height &&
+        a.y + a.height > b.y
+      );
+    }
+
+    function spawnObstacle() {
+      const typeRoll = Math.random();
+      const height = typeRoll > 0.6 ? 35 + Math.random() * 25 : 24 + Math.random() * 18;
+      const width = typeRoll > 0.6 ? 26 + Math.random() * 18 : 18 + Math.random() * 16;
+
+      const obstacle = {
+        x: canvas.width + 20,
+        y: groundY - height,
+        width,
+        height,
+        type: typeRoll > 0.6 ? "cactus" : "rock"
+      };
+
+      obstacles.push(obstacle);
+    }
+
+    function update(dt) {
+      if (!gameRunning || gameOver) return;
+
+      world.groundOffset += world.speed * dt;
+      if (world.groundOffset > 30) world.groundOffset = 0;
+
+      player.velY += gravity;
+      player.y += player.velY;
+
+      if (player.y >= groundY - player.height) {
+        player.y = groundY - player.height;
+        player.velY = 0;
+        player.grounded = true;
+      }
+
+      spawnTimer += dt * 0.06;
+      if (spawnTimer > 60) {
+        spawnTimer = 0;
+        spawnObstacle();
+      }
+
+      for (let i = obstacles.length - 1; i >= 0; i--) {
+        const obj = obstacles[i];
+        obj.x -= world.speed;
+
+        const playerRect = {
+          x: player.x + 6,
+          y: player.y + 5,
+          width: player.width - 12,
+          height: player.height - 8
+        };
+        const obstacleRect = {
+          x: obj.x,
+          y: obj.y,
+          width: obj.width,
+          height: obj.height
+        };
+
+        if (rectsIntersect(playerRect, obstacleRect)) {
+          gameOverState();
+          return;
+        }
+
+        if (obj.x + obj.width < -10) {
+          obstacles.splice(i, 1);
+        }
+      }
+
+      score += dt * 0.02;
+      scoreEl.textContent = Math.floor(score);
+
+      world.speed = 6 + Math.floor(score / 70) * 0.7;
+    }
+
+    function drawCloud(x, y, scale = 1) {
+      ctx.save();
+      ctx.translate(x, y);
+      ctx.scale(scale, scale);
+
+      ctx.fillStyle = "rgba(255,255,255,0.8)";
+      ctx.beginPath();
+      ctx.arc(0, 0, 18, 0, Math.PI * 2);
+      ctx.arc(18, -8, 20, 0, Math.PI * 2);
+      ctx.arc(38, 0, 16, 0, Math.PI * 2);
+      ctx.fill();
+
+      ctx.restore();
+    }
+
+    function drawGround() {
+      ctx.fillStyle = "#7cc56d";
+      ctx.fillRect(0, groundY + 2, canvas.width, canvas.height - groundY);
+
+      ctx.fillStyle = "#6fb563";
+      for (let x = -30; x < canvas.width + 30; x += 26) {
+        ctx.fillRect(x - (world.groundOffset % 26), groundY + 18, 14, 8);
+      }
+
+      ctx.fillStyle = "#d8b57d";
+      ctx.fillRect(0, groundY, canvas.width, 6);
+
+      ctx.fillStyle = "#c79e62";
+      for (let x = -30; x < canvas.width + 30; x += 30) {
+        ctx.fillRect(x - (world.groundOffset % 30), groundY + 6, 16, 3);
+      }
+    }
+
+    function drawCow() {
+      const x = player.x;
+      const y = player.y;
+
+      ctx.save();
+      ctx.translate(x, y);
+
+      ctx.fillStyle = "rgba(55,55,55,0.18)";
+      ctx.beginPath();
+      ctx.ellipse(player.width / 2, player.height + 12, 26, 9, 0, 0, Math.PI * 2);
+      ctx.fill();
+
+      ctx.fillStyle = "#f5f5f5";
+      ctx.fillRect(8, 10, 34, 20);
+      ctx.fillRect(0, 18, 12, 12);
+
+      ctx.fillRect(36, 4, 18, 16);
+
+      ctx.fillStyle = "#3d2f2a";
+      ctx.fillRect(12, 30, 5, 12);
+      ctx.fillRect(26, 30, 5, 12);
+      ctx.fillRect(36, 30, 5, 12);
+      ctx.fillRect(44, 30, 5, 12);
+
+      ctx.fillStyle = "#d4d4d4";
+      ctx.fillRect(18, 12, 10, 8);
+      ctx.fillRect(28, 20, 8, 6);
+      ctx.fillRect(42, 12, 7, 6);
+
+      ctx.fillStyle = "#1d2a2f";
+      ctx.fillRect(48, 8, 3, 3);
+      ctx.fillRect(52, 12, 3, 2);
+      ctx.fillRect(39, 20, 6, 3);
+
+      ctx.fillStyle = "#d7d7d7";
+      ctx.fillRect(39, 0, 2, 7);
+      ctx.fillRect(50, 0, 2, 7);
+
+      ctx.restore();
+    }
+
+    function drawObstacle(obj) {
+      if (obj.type === "cactus") {
+        ctx.fillStyle = "#2e8b57";
+        ctx.fillRect(obj.x, obj.y, 16, obj.height);
+
+        ctx.fillRect(obj.x + 6, obj.y - 8, 14, 8);
+        ctx.fillRect(obj.x + 5, obj.y + 10, 3, obj.height - 10);
+        ctx.fillRect(obj.x + 10, obj.y + 10, 3, obj.height - 10);
+
+        ctx.fillStyle = "#2c7542";
+        ctx.fillRect(obj.x + 18, obj.y + 8, 6, obj.height - 12);
+        ctx.fillRect(obj.x + 22, obj.y + 3, 4, obj.height - 6);
+      } else {
+        ctx.fillStyle = "#7d5a3b";
+        ctx.fillRect(obj.x, obj.y, obj.width, obj.height);
+        ctx.fillStyle = "#5a3d2a";
+        ctx.fillRect(obj.x + 4, obj.y + 6, 4, obj.height - 12);
+        ctx.fillRect(obj.x + 12, obj.y + 6, 4, obj.height - 12);
+        ctx.fillRect(obj.x + 8, obj.y + 10, 2, obj.height - 14);
+      }
+    }
+
+    function drawStartText() {
+      ctx.fillStyle = "rgba(29, 42, 47, 0.9)";
+      ctx.font = "bold 30px Arial";
+      ctx.textAlign = "center";
+      ctx.fillText("Press Space to Start", canvas.width / 2, canvas.height / 2 - 10);
+
+      ctx.font = "bold 18px Arial";
+      ctx.fillText("🐄 Jump over obstacles!", canvas.width / 2, canvas.height / 2 + 28);
+    }
+
+    function drawGameOver() {
+      ctx.fillStyle = "rgba(0,0,0,0.2)";
+      ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+      ctx.fillStyle = "#ffffff";
+      ctx.font = "bold 42px Arial";
+      ctx.textAlign = "center";
+      ctx.fillText("Game Over", canvas.width / 2, canvas.height / 2 - 10);
+
+      ctx.font = "bold 22px Arial";
+      ctx.fillText("Score: " + Math.floor(score), canvas.width / 2, canvas.height / 2 + 28);
+
+      ctx.font = "bold 18px Arial";
+      ctx.fillText("Press R or Space to restart", canvas.width / 2, canvas.height / 2 + 60);
+    }
+
+    function drawBackground() {
+      ctx.fillStyle = "#ffd166";
+      ctx.beginPath();
+      ctx.arc(760, 62, 28, 0, Math.PI * 2);
+      ctx.fill();
+
+      drawCloud(150, 70, 1.2);
+      drawCloud(420, 90, 1);
+      drawCloud(650, 52, 0.9);
+
+      ctx.fillStyle = "#b7d3a0";
+      ctx.beginPath();
+      ctx.moveTo(0, 220);
+      ctx.lineTo(120, 120);
+      ctx.lineTo(240, 220);
+      ctx.lineTo(0, 220);
+      ctx.fill();
+
+      ctx.beginPath();
+      ctx.moveTo(180, 220);
+      ctx.lineTo(350, 115);
+      ctx.lineTo(520, 220);
+      ctx.fill();
+
+      ctx.beginPath();
+      ctx.moveTo(600, 220);
+      ctx.lineTo(720, 120);
+      ctx.lineTo(840, 220);
+      ctx.fill();
+    }
+
+    function render() {
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+      drawBackground();
+      drawGround();
+
+      for (const o of obstacles) {
+        drawObstacle(o);
+      }
+
+      drawCow();
+
+      if (!gameRunning && !gameOver) {
+        drawStartText();
+      }
+
+      if (gameOver) {
+        drawGameOver();
+      }
+    }
+
+    function loop(ts) {
+      if (!lastTime) lastTime = ts;
+      const dt = Math.min(32, ts - lastTime);
+      lastTime = ts;
+
+      update(dt);
+      render();
+
+      if (gameRunning) {
+        animationId = requestAnimationFrame(loop);
+      }
+    }
+
+    document.addEventListener("keydown", (e) => {
+      if (e.code === "Space" || e.code === "ArrowUp") {
+        e.preventDefault();
+        if (!gameRunning) {
+          startGame();
+        } else {
+          jump();
+        }
+      }
+
+      if (e.key.toLowerCase() === "r") {
+        resetGame();
+      }
+    });
+
+    canvas.addEventListener("pointerdown", () => {
+      if (!gameRunning) {
+        startGame();
+      } else {
+        jump();
+      }
+    });
+
+    gameRunning = false;
+    gameOver = false;
+    render();
+  </script>
+</body>
+</html>
